@@ -2,12 +2,15 @@
 #RHC Example
 
 #install packages
-install.packages("tableone")
-install.packages("Matching")
+# install.packages("tableone")
+# install.packages("Matching")
+
+# install.packages("optmatch")
 
 #load packages
 library(tableone)
 library(Matching)
+library(MatchIt)
 
 
 # read in data
@@ -50,14 +53,21 @@ xvars <- c("ARF","CHF","Cirr","colcan","Coma","lungcan","MOSF","sepsis",
 
 #look at a table 1
 table1 <- tableone::CreateTableOne(vars = xvars,
-                                  strata = "treatment", 
-                                  data = mydata,
-                                  test = T)
+                                   strata = "treatment", 
+                                   data = mydata,
+                                   test = T)
 ## include standardized mean difference (SMD)
 print(table1,smd=TRUE)
 
+#outcome analysis
+y_trt <- mydata$died[mydata$treatment==1]
+y_con <- mydata$died[mydata$treatment==0]
 
+#pairwise difference
+diffy<-y_trt-y_con
 
+#paired t-test
+t.test(diffy)
 
 
 
@@ -74,14 +84,12 @@ matched <- mydata[unlist(greedymatch[c("index.treated","index.control")]), ]
 
 
 #get table 1 for matched data with standardized differences
-matchedtab1 <- tableone::CreateTableOne(vars = xvars, 
+matchedtab0 <- tableone::CreateTableOne(vars = xvars, 
                                         strata ="treatment",
                                         data = matched, 
                                         test = T)
 
-print(matchedtab1, smd = TRUE)
-
-
+print(matchedtab0, smd = TRUE)
 
 #outcome analysis
 y_trt <- matched$died[matched$treatment==1]
@@ -92,15 +100,6 @@ diffy<-y_trt-y_con
 
 #paired t-test
 t.test(diffy)
-t.test(died ~ treatment)
-
-# Point estimate: 0.0540293
-# Difference in probability of death if everyone received  RHC versus
-# no one received RHC is 0.05 (i.e., higher risk of death in RHC group)
-# 95%  CI: (0.027, 0.080)
-# P-value: <0.001
-
-
 
 #McNemar test
 table(y_trt,y_con)
@@ -109,14 +108,140 @@ mcnemar.test(matrix(c(973,513,395,303),2,2))
 
 
 
+############################################
+# other methods to match - mahalanobis
+############################################
+
+
+match1 <- MatchIt::matchit(treatment ~ 
+                             ARF + CHF + Cirr + colcan + Coma + lungcan +
+                             MOSF + sepsis + age + female + meanbp1, 
+                           data = mydata,
+                           replace = TRUE,
+                           distance = "mahalanobis")
+
+summary(match1)
+plot(summary(match1))
+dfm1 <- MatchIt::match.data(match1)
+
+#get table 1 for matched data with standardized differences
+matchedtab1 <- tableone::CreateTableOne(vars = xvars, 
+                                        strata ="treatment",
+                                        data = dfm1, 
+                                        test = T)
+
+print(matchedtab1, smd = TRUE)
+
+
+#outcome analysis
+y_trt <- dfm1$died[dfm1$treatment==1]
+y_con <- dfm1$died[dfm1$treatment==0]
+
+#pairwise difference
+diffy<-y_trt-y_con
+
+#paired t-test
+t.test(diffy)
+
+
+
+############################################
+# other methods to match - nearest glm
+############################################
+
+
+match2 <- MatchIt::matchit(treatment ~ 
+                             ARF + CHF + Cirr + colcan + Coma + lungcan +
+                             MOSF + sepsis + age + female + meanbp1, 
+                           data = mydata,
+                           replace = TRUE,
+                           method = "nearest",
+                           distance = "glm")
+
+summary(match2)
+plot(summary(match2))
+dfm2 <- MatchIt::match.data(match2)
+
+#get table 1 for matched data with standardized differences
+matchedtab2 <- tableone::CreateTableOne(vars = xvars, 
+                                        strata ="treatment",
+                                        data = dfm2, 
+                                        test = T)
+
+print(matchedtab2, smd = TRUE)
+
+
+#outcome analysis
+y_trt <- dfm2$died[dfm2$treatment==1]
+y_con <- dfm2$died[dfm2$treatment==0]
+
+#pairwise difference
+diffy<-y_trt-y_con
+
+#paired t-test
+t.test(diffy)
+
+
+
+
+############################################
+# other methods to match - full glm probit
+############################################
+
+
+match3 <- MatchIt::matchit(treatment ~ 
+                             ARF + CHF + Cirr + colcan + Coma + lungcan +
+                             MOSF + sepsis + age + female + meanbp1, 
+                           data = mydata,
+                           method = "full",
+                           distance = "glm",
+                           link = "probit")
+
+summary(match3)
+plot(summary(match3))
+dfm3 <- MatchIt::match.data(match3)
+
+#get table 1 for matched data with standardized differences
+matchedtab3 <- tableone::CreateTableOne(vars = xvars, 
+                                        strata ="treatment",
+                                        data = dfm3, 
+                                        test = T)
+
+print(matchedtab3, smd = TRUE)
+
+
+#outcome analysis
+y_trt <- dfm3$died[dfm3$treatment==1]
+y_con <- dfm3$died[dfm3$treatment==0]
+
+#pairwise difference
+diffy<-y_trt-y_con
+
+#paired t-test
+t.test(diffy)
+
+
+
+
+
+plot(match3, type = "jitter")
+plot(match3, type = "hist")
+
+
+
+
+
+
 ##########################
 #propensity score matching
 #########################
 
+mydata
+
 #fit a propensity score model. logistic regression
 
 psmodel<-glm(treatment~ARF+CHF+Cirr+colcan+Coma+lungcan+MOSF+
-               sepsis+age+female+meanbp1+aps,
+               sepsis+age+female+meanbp1,
              family=binomial(),data=mydata)
 
 #show coefficients etc
@@ -125,8 +250,33 @@ summary(psmodel)
 pscore<-psmodel$fitted.values
 
 
-#do greedy matching on logit(PS) using Match with a caliper
+#do greedy matching on logit(PS) using Match without a caliper
+logit <- function(p) {log(p)-log(1-p)}
+psmatch<-Match(Tr=mydata$treatment,M=1,X=logit(pscore),replace=FALSE)
+matched<-mydata[unlist(psmatch[c("index.treated","index.control")]), ]
+xvars<-c("ARF","CHF","Cirr","colcan","Coma","lungcan","MOSF","sepsis",
+         "age","female","meanbp1")
 
+#get standardized differences
+matchedtab1<-CreateTableOne(vars=xvars, strata ="treatment", 
+                            data=matched, test = FALSE)
+print(matchedtab1, smd = TRUE)
+
+#outcome analysis
+y_trt<-matched$died[matched$treatment==1]
+y_con<-matched$died[matched$treatment==0]
+
+#pairwise difference
+diffy<-y_trt-y_con
+
+#paired t-test
+t.test(diffy)
+
+
+
+
+
+#do greedy matching on logit(PS) using Match with a caliper
 logit <- function(p) {log(p)-log(1-p)}
 psmatch<-Match(Tr=mydata$treatment,M=1,X=logit(pscore),replace=FALSE,caliper=.2)
 matched<-mydata[unlist(psmatch[c("index.treated","index.control")]), ]
@@ -147,3 +297,51 @@ diffy<-y_trt-y_con
 
 #paired t-test
 t.test(diffy)
+
+
+
+
+
+# use matchit for propensity score, nearest neighbor matching
+m.out <- MatchIt::matchit(treatment ~
+                            ARF + CHF + Cirr + colcan + Coma + lungcan +
+                            MOSF + sepsis + age + female + meanbp1,
+                          data = mydata,
+                          method = "nearest")
+
+summary(m.out)
+plot(m.out, type = "jitter")
+plot(m.out, type = "hist")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
